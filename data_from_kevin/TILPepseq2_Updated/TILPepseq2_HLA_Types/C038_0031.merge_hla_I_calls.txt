@@ -1,0 +1,43 @@
+#HLA COMMAND: /packages/phlat/anaconda/bin/python2.7 -O /packages/phlat/dist/PHLAT.py -1 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_PB_Whole_C1_K1ID2_A96341_R1_001.fastq.gz -2 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_PB_Whole_C1_K1ID2_A96341_R2_001.fastq.gz -index /packages/phlat/b2folder -b2url /packages/bowtie2/2.3.0/bowtie2 -tag C038_0031_Normal -e /packages/phlat -o /scratch/kdrenner/Patients/C038_0031
+#HLA COMMAND: /home/tgenref/binaries/bwa-kit/0.7.12-r1039/run-bwamem -o C038_0031_Tumor_RNA_bwa -t 32 -k -H /home/tgenref/homo_sapiens/grch38_hg38/hs38dh/tool_specific_resources/bwa/hs38DH.fa /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1RIB_A96617_R1_001.fastq.gz /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1RIB_A96617_R2_001.fastq.gz | sh
+#HLA COMMAND: python /home/tgenref/binaries/seq2HLA/sebastian_boegel-seq2hla-c37148c10e85/seq2HLA.py -1 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1RIB_A96617_R1_001.fastq.gz -2 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1RIB_A96617_R2_001.fastq.gz -r "C038_0031_Tumor_RNA" -p 14
+#HLA COMMAND: /home/tgenref/binaries/bwa-kit/0.7.12-r1039/run-bwamem -o C038_0031_Tumor_bwa -t 32 -k -H /home/tgenref/homo_sapiens/grch38_hg38/hs38dh/tool_specific_resources/bwa/hs38DH.fa /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1ID2_A96306_R1_001.fastq.gz /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1ID2_A96306_R2_001.fastq.gz | sh
+#HLA COMMAND: /home/tgenref/binaries/bwa-kit/0.7.12-r1039/run-bwamem -o C038_0031_Normal_bwa -t 32 -k -H /home/tgenref/homo_sapiens/grch38_hg38/hs38dh/tool_specific_resources/bwa/hs38DH.fa /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_PB_Whole_C1_K1ID2_A96341_R1_001.fastq.gz /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_PB_Whole_C1_K1ID2_A96341_R2_001.fastq.gz | sh
+#HLA COMMAND: /packages/phlat/anaconda/bin/python2.7 -O /packages/phlat/dist/PHLAT.py -1 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1ID2_A96306_R1_001.fastq.gz -2 /scratch/kdrenner/Patients/C038_0031/fastqforPipeline/C038_0031_018167_LV_Whole_T2_K1ID2_A96306_R2_001.fastq.gz -index /packages/phlat/b2folder -b2url /packages/bowtie2/2.3.0/bowtie2 -tag C038_0031_Tumor -e /packages/phlat -o /scratch/kdrenner/Patients/C038_0031
+Caller	Sample	HLA_compact	HLA_call
+phlat_HLA_I	C038_0031_Normal_HLA	A0101	HLA-A*01:01	
+phlat_HLA_I	C038_0031_Normal_HLA	A0205	HLA-A*02:05	
+phlat_HLA_I	C038_0031_Normal_HLA	B0702	HLA-B*07:02	
+phlat_HLA_I	C038_0031_Normal_HLA	B0801	HLA-B*08:01	
+phlat_HLA_I	C038_0031_Normal_HLA	C0701	HLA-C*07:01	
+phlat_HLA_I	C038_0031_Normal_HLA	C0702	HLA-C*07:02	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	A0101	HLA-A*01:01	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	A02179	HLA-A*02:179	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	B0708	HLA-B*07:08	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	B08132	HLA-B*08:132	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	C0719	HLA-C*07:19	
+bwakit_results_HLA_I	C038_0031_Tumor_RNA_bwa	C0727	HLA-C*07:27	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	A0101	HLA-A*01:01	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	A0205	HLA-A*02:05	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	B0801	HLA-B*08:01	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	B0702	HLA-B*07:02	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	C0701	HLA-C*07:01	
+seq2HLA_HLA_I	C038_0031_Tumor_RNA-ClassI	C0701	HLA-C*07:01	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	A0101	HLA-A*01:01	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	A0205	HLA-A*02:05	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	B0702	HLA-B*07:02	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	B0801	HLA-B*08:01	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	C0701	HLA-C*07:01	
+bwakit_results_HLA_I	C038_0031_Tumor_bwa	C0702	HLA-C*07:02	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	A0101	HLA-A*01:01	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	A0205	HLA-A*02:05	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	B0702	HLA-B*07:02	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	B0801	HLA-B*08:01	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	C0701	HLA-C*07:01	
+bwakit_results_HLA_I	C038_0031_Normal_bwa	C0702	HLA-C*07:02	
+phlat_HLA_I	C038_0031_Tumor_HLA	A0101	HLA-A*01:01	
+phlat_HLA_I	C038_0031_Tumor_HLA	A0205	HLA-A*02:05	
+phlat_HLA_I	C038_0031_Tumor_HLA	B0702	HLA-B*07:02	
+phlat_HLA_I	C038_0031_Tumor_HLA	B0801	HLA-B*08:01	
+phlat_HLA_I	C038_0031_Tumor_HLA	C0701	HLA-C*07:01	
+phlat_HLA_I	C038_0031_Tumor_HLA	C0702	HLA-C*07:02	
