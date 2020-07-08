@@ -2,9 +2,7 @@
 title: "TM2 PepSeq Library Design"
 author: "E. Kelley"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: 
-  html_document:
-    keep_md: true
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -78,7 +76,7 @@ peptides_long <- data %>%
   select(variantId, effectId, gene_name, topEffect, sourceName, file, peptide, sequence) %>%
   filter(!is.na(sequence)) %>%
   relocate(effectId, .after = sequence)
-create_dt(peptides_long)
+#create_dt(peptides_long)
 ```
 
 We only want to include variants with `topEffect` and length=15.  Summarizing
@@ -87,11 +85,11 @@ library design.
 ```{r}
 not_topEffect <- peptides_long %>%
   filter(topEffect == FALSE)
-create_dt(not_topEffect)
+#create_dt(not_topEffect)
 
 not_15mers <- peptides_long %>%
   filter(!(str_length(sequence) == 15))
-create_dt(not_15mers)
+#create_dt(not_15mers)
 ```
 
 After filtering for `topEffect == TRUE`, there are some duplicated sequences remaining.
@@ -104,7 +102,7 @@ pep_dups <- peptides_long %>%
   group_by(sequence) %>%
   mutate(dup = n() > 1) %>%
   filter(dup == TRUE)
-create_dt(pep_dups)
+#create_dt(pep_dups)
 ```
 
 Need to just include a single peptide sequence for the duplicates in our peptide pool for library design.
@@ -133,7 +131,7 @@ for_library_design$id <- str_c(rep("TM2_", length(for_library_design$sequence)),
 
 # This file contains 2 columns – the first with one entry for each unique peptide; the second with the peptide identifier (eg "TM1_00001")
 named_peptides <- for_library_design %>% select(id, sequence)
-create_dt(named_peptides)
+#create_dt(named_peptides)
 # write_csv(named_peptides, path = "design_outs/named_peptides.csv", col_names = FALSE,  quote = FALSE)
 # write_csv(annotated_peptides, path = "design_outs/annotated_peptides.csv")
 ```
@@ -161,6 +159,11 @@ cat analysis/bash/run_pepseq_design_step2.sh
 #### The final `best_encodings` output from `oligo_encoding`:
 ```{r}
 best_encodings <- read_csv("analysis/bash/best_encodings")
-create_dt(best_encodings)
+#create_dt(best_encodings)
+```
+
+```{r, echo=FALSE}
+#Create a github reamde file.
+#rmarkdown::render("TM2_PepSeq_preprocess_for_library_design.Rmd", output_format = rmarkdown::github_document(), output_file = "README.md")
 ```
 
