@@ -1,0 +1,27 @@
+---
+title: "Check_codon_weights"
+author: "E. Kelley"
+date: "7/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+```
+Check to the amino acids present in the library's named_peptides.csv file to make sure all
+are present in codon_weights.csv
+```{r}
+codon_weights <- read_csv(file = "codon_weights.csv", col_names = FALSE)
+library_aa <- named_peptides %>% pull(sequence) %>%
+  paste(sep="", collapse = "")
+
+missing_aa <- intersect(library_aa[[1]], codon_weights$X1)
+
+find_U <- named_peptides %>% pull(sequence) %>% str_detect(., pattern = "U")
+```
+

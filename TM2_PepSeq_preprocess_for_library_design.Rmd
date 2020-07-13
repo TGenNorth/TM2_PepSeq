@@ -132,7 +132,7 @@ for_library_design$id <- str_c(rep("TM2_", length(for_library_design$sequence)),
 # This file contains 2 columns – the first with one entry for each unique peptide; the second with the peptide identifier (eg "TM1_00001")
 named_peptides <- for_library_design %>% select(id, sequence)
 #create_dt(named_peptides)
-# write_csv(named_peptides, path = "design_outs/named_peptides.csv", col_names = FALSE,  quote = FALSE)
+#write_csv(named_peptides, path = "design_outs/named_peptides.csv", col_names = FALSE,  quote = FALSE)
 # write_csv(annotated_peptides, path = "design_outs/annotated_peptides.csv")
 ```
 ----
@@ -159,7 +159,17 @@ cat analysis/bash/run_pepseq_design_step2.sh
 #### The final `best_encodings` output from `oligo_encoding`:
 ```{r}
 best_encodings <- read_csv("analysis/bash/best_encodings")
-#create_dt(best_encodings)
+#create_dt
+
+control_orderfile <- read_csv("analysis/R/control_orderfile.csv", col_names = FALSE) %>%
+  set_names(c("Seq ID", "Nucleotide Encoding w/ Adapters"))
+View(control_orderfile)
+
+encodings_order <- best_encodings %>% select(`Seq ID`, `Nucleotide Encoding w/ Adapters`) %>% arrange(`Seq ID`)
+
+orderfile <- bind_rows(encodings_order, control_orderfile)
+#write_csv(orderfile, "orderfile.csv")
+
 ```
 
 ```{r, echo=FALSE}
