@@ -1,0 +1,86 @@
+---
+title: "TM2 PepSeq MHC I binding predictions"
+author: "E. Kelley"
+date: "9/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+library(MHCbindR)
+library(tidyverse)
+library(here)
+```
+
+
+```{r}
+# For some reason the import_hla_calls function has a hard-coded file path for the hla data. Need to redefine it until I can rebuild the package.
+
+import_hla_calls <- function(hla_data_path, file_pattern){
+  files <- dir(path = hla_data_path, pattern = file_pattern)
+  hla_I <- files %>%
+    map_dfr(function(x) {
+      read_table2(file.path(hla_data_path, x), skip = 6) %>% mutate(file=x)
+    }) %>% bind_rows()
+  return(hla_I)
+}
+```
+
+
+```{r}
+hla_I_calls <- import_hla_calls(here("data_from_kevin", "TILPepseq2_Updated", "TILPepseq2_HLA_Types"), "*_hla_I_calls.txt")
+  
+```
+
+```{r}
+hla_I_filtered <- select_top_hla_calls(hla_I_calls)
+```
+
+Write a file of HLA top alleles to run predictions against using the IEDB tool.
+```{r}
+hla_I_best_calls <- hla_I_filtered %>%
+  select(best_hla_1, best_hla_2)
+hla_I_for_iedbtools <- tibble(unique(c(hla_I_best_calls$best_hla_1, hla_I_best_calls$best_hla_2)))
+  
+#write_delim(hla_I_for_iedbtools, "analysis/R/hla_I_for_iedbtools.txt", delim = "\t")
+```
+
+```{r}
+names(named_peptides)[[2]] <- "peptide"
+TM2_peptides_kmers <- MHCbindR::convert_named_peptides_fasta(named_peptides, named_peptides$peptide, kmer_length = 9, fasta_out = FALSE)
+```
+
+Import the IEDB MHC-I binding predictions
+```{r}
+MHC_df <- MHCbindR::import_preds(here("analysis", "bash", "TM2_PepSeq_IEDB_preds"))
+```
+
+Pull out the binders w/ min percentile rank.
+```{r}
+named_preds_min_perc <- MHCbindR::name_filter_kmer_preds(MHC_df, TM2_peptides_kmers)
+```
+
+
+```{r}
+# This is failing silently
+TM2_annotated_mhc_preds <- annotate_mhc_preds(named_preds_, annotated_peptides)
+annotate_mhc_preds <- function(named_mhc_preds, annotated_peptides, df_out = NULL) {
+  if (is.null(df_out)) {
+    named_mhc_preds %>%
+      map(right_join, annotated_peptides, by = c("peptide.y" = "sequence")) %>%
+      map(distinct, peptide.x, .keep_all = TRUE)
+  } else {
+    named_mhc_preds %>%
+      map(right_join, annotated_peptides, by = c("peptide.y" = "sequence")) %>%
+      map(distinct, peptide.x, .keep_all = TRUE) %>%
+      bind_rows()
+  }
+}
+
+```
+
+
+```{r}
+named_preds <- MHCbindR::add_names_preds(MHC_df, here("analysis", "bash", "TM2_PepSeq_IEDB_preds", "named_peptides_9.fasta"))
+```
+
