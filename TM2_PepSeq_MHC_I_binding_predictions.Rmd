@@ -13,7 +13,7 @@ library(here)
 ```
 
 
-```{r}
+```{r, redefine `import_hla_calls`}
 # For some reason the import_hla_calls function has a hard-coded file path for the hla data. Need to redefine it until I can rebuild the package.
 
 import_hla_calls <- function(hla_data_path, file_pattern){
@@ -27,43 +27,78 @@ import_hla_calls <- function(hla_data_path, file_pattern){
 ```
 
 
-```{r}
+```{r, import hla data, message=FALSE, warning=FALSE}
 hla_I_calls <- import_hla_calls(here("data_from_kevin", "TILPepseq2_Updated", "TILPepseq2_HLA_Types"), "*_hla_I_calls.txt")
-  
 ```
 
-```{r}
+
+```{r, get top hla calls}
 hla_I_filtered <- select_top_hla_calls(hla_I_calls)
 ```
 
+
 Write a file of HLA top alleles to run predictions against using the IEDB tool.
-```{r}
+```{r, write top hla alleles for iedb}
 hla_I_best_calls <- hla_I_filtered %>%
   select(best_hla_1, best_hla_2)
 hla_I_for_iedbtools <- tibble(unique(c(hla_I_best_calls$best_hla_1, hla_I_best_calls$best_hla_2)))
   
-#write_delim(hla_I_for_iedbtools, "analysis/R/hla_I_for_iedbtools.txt", delim = "\t")
+# write_delim(hla_I_for_iedbtools, "analysis/R/hla_I_for_iedbtools.txt", delim = "\t")
 ```
 
-```{r}
-names(named_peptides)[[2]] <- "peptide"
-TM2_peptides_kmers <- MHCbindR::convert_named_peptides_fasta(named_peptides, named_peptides$peptide, kmer_length = 9, fasta_out = FALSE)
+
+```{r, write fasta of library for iedb input}
+TM2_named_peptides <- read_csv("design_outs/named_peptides.csv", col_names = FALSE)
+names(TM2_named_peptides) <- c("name", "peptide")
+
+# kmer_length must be set to kmer minus one. hahahaha. 
+TM2_peptides_kmers <- MHCbindR::convert_named_peptides_fasta(TM2_named_peptides, TM2_named_peptides$peptide, kmer_length = 8, fasta_out = FALSE)
 ```
+
+
+```{r, get unique hla calls for small patient set}
+select_patients <- c("C038_0022","C038_0036","C038_0031","C038_0044", "C038_0038")
+short_hla <- hla_I_best_calls %>% filter(patient %in% select_patients)
+shla <- c(short_hla$best_hla_1, short_hla$best_hla_2)
+short_hla_unique_alleles <- unique(shla)
+```
+
 
 Import the IEDB MHC-I binding predictions
-```{r}
+```{r, import binding preds}
 MHC_df <- MHCbindR::import_preds(here("analysis", "bash", "TM2_PepSeq_IEDB_preds"))
 ```
 
+
 Pull out the binders w/ min percentile rank.
 ```{r}
-named_preds_min_perc <- MHCbindR::name_filter_kmer_preds(MHC_df, TM2_peptides_kmers)
+# group by library_member, ie 'name', take min
+# find_okayest_binders <- function(df){
+#   df %>% group_by(name) %>%
+#     filter(percentile_rank == min(percentile_rank, na.rm = TRUE)) %>% ungroup() %>%
+#     slice_min(percentile_rank, n=5000)
+# }
+
+find_okayest_binders <- function(df){
+  df %>% group_by(name) %>%
+    #filter(percentile_rank == min(percentile_rank, na.rm = TRUE)) %>% ungroup() %>%
+    slice_min(percentile_rank, n=5000)
+}
+
+
+name_filter_kmer_preds_okayest_binders <- function(df_mhc, peptides_kmers) {
+  df_mhc %>%
+    map(left_join, peptides_kmers, by = c("peptide" = "sequence")) %>%
+    map(find_okayest_binders) %>%
+    map(distinct, peptide, .keep_all = TRUE)
+}
+
+named_preds <- name_filter_kmer_preds_okayest_binders(MHC_df, TM2_peptides_kmers)
 ```
 
 
+Run the library design markdown.
 ```{r}
-# This is failing silently
-TM2_annotated_mhc_preds <- annotate_mhc_preds(named_preds_, annotated_peptides)
 annotate_mhc_preds <- function(named_mhc_preds, annotated_peptides, df_out = NULL) {
   if (is.null(df_out)) {
     named_mhc_preds %>%
@@ -76,11 +111,175 @@ annotate_mhc_preds <- function(named_mhc_preds, annotated_peptides, df_out = NUL
       bind_rows()
   }
 }
+# filter out wild type mutations and select patients
+annotated_peptides_select_patients <- annotated_peptides %>%
+  filter(str_detect(peptide, "wt", negate = TRUE)) %>%
+  filter(file %in% c("C038_0022_merged_Ashion_Research_Peptide_100PercentIdentityRemoved.varCode.csv",
+                     "C038_0031_merged_Ashion_Research_Peptide.varCode.csv",
+                     "C038_0036_merged_Ashion_Research_Peptide_100PercentIdentityRemoved.varCode.csv",
+                     "C038_0038_merged_Ashion_Research_Peptide.varCode.csv",
+                     "C038_0044_merged_Ashion_Research_Peptide.varCode.csv")) 
 
+
+TM2_annotated_mhc_preds <- annotate_mhc_preds(named_preds, annotated_peptides_select_patients)
+
+alleles <- str_replace(str_replace(short_hla_unique_alleles, "\\*", "\\-"), "\\:", "\\-")
+
+
+# Get just the predictions for HLA alleles in our `short_hla_unique_alleles` list
+TM2_annotated_mhc_preds_short_alleles <- names(TM2_annotated_mhc_preds)[str_sub(names(TM2_annotated_mhc_preds), 30,-5) %in% alleles]
+
+TM2_annotated_mhc_preds_short <- TM2_annotated_mhc_preds[TM2_annotated_mhc_preds_short_alleles]
 ```
 
 
+
 ```{r}
-named_preds <- MHCbindR::add_names_preds(MHC_df, here("analysis", "bash", "TM2_PepSeq_IEDB_preds", "named_peptides_9.fasta"))
+# named_preds <- MHCbindR::add_names_preds(MHC_df, here("analysis", "bash", "TM2_PepSeq_IEDB_preds", "named_peptides_9.fasta"))
+```
+
+
+
+```{r, import MHC II peptides, warning=FALSE}
+# Annas selected MHC II binders
+TM2_PepSeq_peptides_AE_selected <- read_csv("20201125_TM2_PepSeq_peptides_AE_selected.csv", col_types = "cccccccc")
+```
+
+
+
+Need to fill in the list of peptides with MHC I binders.
+Make a single data from `TM2_annotated_preds_short` and narrow in on the final set per patient.
+```{r}
+# TM2_annotated_mhc_preds_short_df <- map_df(TM2_annotated_mhc_preds_short, ~bind_rows(.x)) %>%
+#   mutate(ashion_id=str_sub(file, end = 9)) %>%
+#   group_by(ashion_id) %>%
+#   distinct(effectId, .keep_all = TRUE) %>% 
+#   ungroup()
+
+TM2_annotated_mhc_preds_short_df <- map_df(TM2_annotated_mhc_preds_short, ~bind_rows(.x)) %>%
+  mutate(ashion_id = str_sub(file, end = 9)) %>%
+  group_by(ashion_id, allele) %>%
+  distinct(effectId, .keep_all = TRUE) %>% 
+  ungroup()
+
+
+
+TM2_annotated_mhc_preds_short_df_split <- TM2_annotated_mhc_preds_short_df %>%
+  group_by(ashion_id) %>%
+  group_split()
+
+# get number of effectId's for each patient
+mutations_per_patient <- map_chr(TM2_annotated_mhc_preds_short_df_split, ~length(.x[[1]]))
+
+names(TM2_annotated_mhc_preds_short_df_split) <- c(TM2_annotated_mhc_preds_short_df_split[[1]]$ashion_id[[1]],
+                                                   TM2_annotated_mhc_preds_short_df_split[[2]]$ashion_id[[1]],
+                                                   TM2_annotated_mhc_preds_short_df_split[[3]]$ashion_id[[1]],
+                                                   TM2_annotated_mhc_preds_short_df_split[[4]]$ashion_id[[1]],
+                                                   TM2_annotated_mhc_preds_short_df_split[[5]]$ashion_id[[1]])
+```
+
+
+Make list for C038_0022
+```{r}
+C038_0022_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0022")
+C038_0022_hlas_vec <- unique(c(C038_0022_hlas$best_hla_1, C038_0022_hlas$best_hla_2))
+
+C038_0022_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0022 %>%
+  filter(allele %in% C038_0022_hlas_vec)
+
+C038_0022_peptides_list_min <- C038_0022_peptides_list %>%
+  group_by(peptide.y) %>%
+  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
+  ungroup() %>%
+  group_by(allele) %>%
+  slice_min(med_perc_rank_x_alleles, n=50) %>%
+  ungroup() %>%
+  arrange(med_perc_rank_x_alleles) %>%
+  distinct(effectId, .keep_all = T) %>%
+  slice_min(med_perc_rank_x_alleles, n=24)
+```
+
+
+Make list for C038_0031
+```{r}
+C038_0031_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0031")
+C038_0031_hlas_vec <- unique(c(C038_0031_hlas$best_hla_1, C038_0031_hlas$best_hla_2))
+
+C038_0031_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0031 %>%
+  filter(allele %in% C038_0031_hlas_vec)
+
+C038_0031_peptides_list_min <- C038_0031_peptides_list %>%
+  group_by(peptide.y) %>%
+  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
+  ungroup() %>%
+  group_by(allele) %>%
+  slice_min(med_perc_rank_x_alleles, n=50) %>%
+  ungroup() %>%
+  arrange(med_perc_rank_x_alleles) %>%
+  distinct(effectId, .keep_all = T) %>%
+  slice_min(med_perc_rank_x_alleles, n=24)
+
+
+```
+
+Make list for C038_0036
+```{r}
+C038_0036_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0036")
+C038_0036_hlas_vec <- unique(c(C038_0036_hlas$best_hla_1, C038_0036_hlas$best_hla_2))
+
+C038_0036_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0036 %>%
+  filter(allele %in% C038_0036_hlas_vec)
+
+C038_0036_peptides_list_min <- C038_0036_peptides_list %>%
+  group_by(peptide.y) %>%
+  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
+  ungroup() %>%
+  group_by(allele) %>%
+  slice_min(med_perc_rank_x_alleles, n=50) %>%
+  ungroup() %>%
+  arrange(med_perc_rank_x_alleles) %>%
+  distinct(effectId, .keep_all = T) %>%
+  slice_min(med_perc_rank_x_alleles, n=24)
+
+```
+
+Make list for C038_0038
+```{r}
+C038_0038_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0038")
+C038_0038_hlas_vec <- unique(c(C038_0038_hlas$best_hla_1, C038_0038_hlas$best_hla_2))
+
+C038_0038_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0038 %>%
+  filter(allele %in% C038_0038_hlas_vec)
+
+C038_0038_peptides_list_min <- C038_0038_peptides_list %>%
+  group_by(peptide.y) %>%
+  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
+  ungroup() %>%
+  group_by(allele) %>%
+  slice_min(med_perc_rank_x_alleles, n=50) %>%
+  ungroup() %>%
+  arrange(med_perc_rank_x_alleles) %>%
+  distinct(effectId, .keep_all = T) %>%
+  slice_min(med_perc_rank_x_alleles, n=24)
+```
+
+Make list for C038_0044
+```{r}
+C038_0044_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0044")
+C038_0044_hlas_vec <- unique(c(C038_0044_hlas$best_hla_1, C038_0044_hlas$best_hla_2))
+
+C038_0044_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0044 %>%
+  filter(allele %in% C038_0044_hlas_vec)
+
+C038_0044_peptides_list_min <- C038_0044_peptides_list %>%
+  group_by(peptide.y) %>%
+  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
+  ungroup() %>%
+  group_by(allele) %>%
+  slice_min(med_perc_rank_x_alleles, n=50) %>%
+  ungroup() %>%
+  arrange(med_perc_rank_x_alleles) %>%
+  distinct(effectId, .keep_all = T) %>%
+  slice_min(med_perc_rank_x_alleles, n=24)
 ```
 

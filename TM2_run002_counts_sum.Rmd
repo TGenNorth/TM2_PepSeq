@@ -1,0 +1,42 @@
+---
+title: "TM2_demux_and_sum"
+author: "E. Kelley"
+date: "11/11/2020"
+output: html_document
+---
+
+```{r}
+annotated_peptides <- read_csv("design_outs/annotated_peptides.csv")
+named_peptides <- read_csv("design_outs/named_peptides.csv", 
+    col_names = FALSE)
+```
+
+
+Prepare the peptide annotations for PepSeq analysis. 
+```{r}
+# Import the counts file that John generated.
+counts <- read_delim("analysis/demux/TM2_run002/TIL_TM2_run002_2mm_i1mm.tsv", delim = "\t")
+
+# Remove the encoding suffix, eg "_100"
+counts_for_sum <- counts %>% 
+  mutate(sequence_name = str_replace(`Sequence name`, pattern="_\\d+$", replacement = ""))
+
+# Group by the peptide library member name and sum all counts for the three encodings.
+counts_sum <- counts_for_sum %>%
+  group_by(sequence_name) %>%
+  summarise_if(is.numeric, funs(sum))
+
+# Join the annotation data to the peptide library names.
+annotated_peptides_named <- left_join(annotated_peptides, named_peptides)
+
+# Add the PepSeq sequencing counts that John sent.
+annotated_peptides_with_counts <- full_join(annotated_peptides_named, counts_sum, by=c("id" = "sequence_name"))
+
+# Double check that the controls in the annotated_peptides_with_counts match the number of controls in the order file, ie did all of the controls make it through the above joins.
+count_controls <- control_orderfile %>%
+  mutate(sequence_name = str_replace(`Seq ID`, pattern="_\\d+$", replacement = "")) %>%
+  pull(sequence_name) %>% unique() %>% length()
+
+# Write the annotated_peptides_with_counts df to a file for downstream analysis by Anna/John
+# write_csv(annotated_peptides_with_counts, "analysis/R/TM2_run002_annotated_peptides_with_counts.csv")
+```
