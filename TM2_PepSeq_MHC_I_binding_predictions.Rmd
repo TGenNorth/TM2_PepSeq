@@ -156,13 +156,13 @@ Make a single data from `TM2_annotated_preds_short` and narrow in on the final s
 #   distinct(effectId, .keep_all = TRUE) %>% 
 #   ungroup()
 
+# There are redundant peptides in the data frames, grouping by ashion_id and allele will make sure
+# just one effectId is kept from the duplicates.
 TM2_annotated_mhc_preds_short_df <- map_df(TM2_annotated_mhc_preds_short, ~bind_rows(.x)) %>%
   mutate(ashion_id = str_sub(file, end = 9)) %>%
   group_by(ashion_id, allele) %>%
   distinct(effectId, .keep_all = TRUE) %>% 
   ungroup()
-
-
 
 TM2_annotated_mhc_preds_short_df_split <- TM2_annotated_mhc_preds_short_df %>%
   group_by(ashion_id) %>%
@@ -179,6 +179,53 @@ names(TM2_annotated_mhc_preds_short_df_split) <- c(TM2_annotated_mhc_preds_short
 ```
 
 
+
+
+Function to select the peptide with best binding for each allele and append to list.
+```{r}
+
+# myexample <- C038_0022_peptides_list
+# 
+# start <- list(
+#   top = tibble(), # starting with an empty tibble
+#   rest = myexample
+# )
+
+get_top_allele_per_peptide <- function(l, counter) {
+  # get best percentile_rank per peptide
+  # but per iteration each allele must get one and only one peptide,
+  # arrange by percentile_rank, so that distinct takes the best peptide per allele.
+  next_top <- l$rest %>% 
+    group_by(peptide.y) %>%
+    slice_min(percentile_rank, n = 1) %>% 
+    ungroup() %>%
+    arrange(percentile_rank) %>%
+    distinct(allele, .keep_all = TRUE)
+  # append the new top picks to the accumulated ones 
+  new_top <- bind_rows(l$top,
+                       next_top)
+  # remove the top peptides from the pool
+  new_rest <- anti_join(l$rest, next_top, by = "peptide.y")
+  # pass on the new  accumulator
+  list(top  = new_top,
+       rest = new_rest)
+}
+
+# sanity check the peptide selection chunk of `get_top_allele_per_peptide`
+# result2 <- reduce(1:3, get_top_allele_per_peptide, .init = start)$top
+# 
+# next_top <- start$rest %>% 
+#     group_by(peptide.y) %>%
+#     slice_min(percentile_rank, n = 1)
+# 
+# next_top1 <- next_top %>% 
+#     ungroup() %>%
+#     arrange(percentile_rank) %>%  
+#     distinct(allele, .keep_all = TRUE)
+
+```
+
+
 Make list for C038_0022
 ```{r}
 C038_0022_hlas <- hla_I_best_calls %>% filter(patient %in% "C038_0022")
@@ -187,16 +234,31 @@ C038_0022_hlas_vec <- unique(c(C038_0022_hlas$best_hla_1, C038_0022_hlas$best_hl
 C038_0022_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0022 %>%
   filter(allele %in% C038_0022_hlas_vec)
 
-C038_0022_peptides_list_min <- C038_0022_peptides_list %>%
-  group_by(peptide.y) %>%
-  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
-  ungroup() %>%
-  group_by(allele) %>%
-  slice_min(med_perc_rank_x_alleles, n=50) %>%
-  ungroup() %>%
-  arrange(med_perc_rank_x_alleles) %>%
-  distinct(effectId, .keep_all = T) %>%
-  slice_min(med_perc_rank_x_alleles, n=24)
+C038_0022_start_list <- list(
+  top = tibble(),
+  rest = C038_0022_peptides_list
+)
+# 1:3 will give 3 peptides per allele.
+C038_0022_peptides_list_min <- reduce(1:3, get_top_allele_per_peptide, .init=C038_0022_start_list)$top
+
+# Combine with Anna's MHC II peptides, but first get the annotations for those.
+C038_0022_PepSeq_peptides <- TM2_PepSeq_peptides_AE_selected %>%
+  filter(ashion_id == "C038_0022") %>%
+  left_join(annotated_peptides)
+
+# quick check for overlap between PepSeq chosen peptides and prediction chosen.
+C038_0022_PepSeq_peptides$sequence %in% C038_0022_peptides_list_min$peptide.y
+C038_0022_pool <- C038_0022_peptides_list_min %>%
+  rename("sequence"="peptide.y") %>%
+  rename("library_member"="name") %>%
+  rename("peptide"="peptide.y.y") %>%
+  full_join(C038_0022_PepSeq_peptides)
+
+#write csv for peptide order.
+# C038_0022_pool %>%
+#   select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id) %>%
+#   write_csv(path = "analysis/R/C038_0022_peptides_pool.csv")
+
 ```
 
 
@@ -208,19 +270,36 @@ C038_0031_hlas_vec <- unique(c(C038_0031_hlas$best_hla_1, C038_0031_hlas$best_hl
 C038_0031_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0031 %>%
   filter(allele %in% C038_0031_hlas_vec)
 
-C038_0031_peptides_list_min <- C038_0031_peptides_list %>%
-  group_by(peptide.y) %>%
-  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
-  ungroup() %>%
-  group_by(allele) %>%
-  slice_min(med_perc_rank_x_alleles, n=50) %>%
-  ungroup() %>%
-  arrange(med_perc_rank_x_alleles) %>%
-  distinct(effectId, .keep_all = T) %>%
-  slice_min(med_perc_rank_x_alleles, n=24)
+C038_0031_start_list <- list(
+  top = tibble(),
+  rest = C038_0031_peptides_list
+)
 
+table(TM2_PepSeq_peptides_AE_selected$ashion_id)
+# Need to fill in 15 peptides from 6 alleles, so will select 3 per allele for a total of 18.
+C038_0031_peptides_list_min <- reduce(1:3, get_top_allele_per_peptide, .init=C038_0031_start_list)$top
+
+# Combine with Anna's MHC II peptides, but first get the annotations for those.
+C038_0031_PepSeq_peptides <- TM2_PepSeq_peptides_AE_selected %>%
+  filter(ashion_id == "C038_0031") %>%
+  left_join(annotated_peptides)
+
+# quick check for overlap between PepSeq chosen peptides and prediction chosen.
+# Looks like we have 3 overlapping between the two. Will have exactly 24 unique peptides.
+C038_0031_PepSeq_peptides$sequence %in% C038_0031_peptides_list_min$peptide.y
+C038_0031_pool <- C038_0031_peptides_list_min %>%
+  rename("sequence"="peptide.y") %>%
+  rename("library_member"="name") %>%
+  rename("peptide"="peptide.y.y") %>%
+  full_join(C038_0031_PepSeq_peptides)
+
+#write csv for peptide order.
+# C038_0031_pool %>%
+#   select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id) %>%
+#   write_csv(path = "analysis/R/C038_0031_peptides_pool.csv")
 
 ```
+
 
 Make list for C038_0036
 ```{r}
@@ -230,18 +309,36 @@ C038_0036_hlas_vec <- unique(c(C038_0036_hlas$best_hla_1, C038_0036_hlas$best_hl
 C038_0036_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0036 %>%
   filter(allele %in% C038_0036_hlas_vec)
 
-C038_0036_peptides_list_min <- C038_0036_peptides_list %>%
-  group_by(peptide.y) %>%
-  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
-  ungroup() %>%
-  group_by(allele) %>%
-  slice_min(med_perc_rank_x_alleles, n=50) %>%
-  ungroup() %>%
-  arrange(med_perc_rank_x_alleles) %>%
-  distinct(effectId, .keep_all = T) %>%
-  slice_min(med_perc_rank_x_alleles, n=24)
+C038_0036_start_list <- list(
+  top = tibble(),
+  rest = C038_0036_peptides_list
+)
+
+table(TM2_PepSeq_peptides_AE_selected$ashion_id)
+# Need to fill in 14 peptides from 6 alleles, so will select 3 per allele for a total of 18.
+C038_0036_peptides_list_min <- reduce(1:3, get_top_allele_per_peptide, .init=C038_0036_start_list)$top
+
+# Combine with Anna's MHC II peptides, but first get the annotations for those.
+C038_0036_PepSeq_peptides <- TM2_PepSeq_peptides_AE_selected %>%
+  filter(ashion_id == "C038_0036") %>%
+  left_join(annotated_peptides)
+
+# quick check for overlap between PepSeq chosen peptides and prediction chosen.
+# Looks like we have 1 overlapping between the two. Will have exactly 24 unique peptides.
+C038_0036_PepSeq_peptides$sequence %in% C038_0036_peptides_list_min$peptide.y
+C038_0036_pool <- C038_0036_peptides_list_min %>%
+  rename("sequence"="peptide.y") %>%
+  rename("library_member"="name") %>%
+  rename("peptide"="peptide.y.y") %>%
+  full_join(C038_0036_PepSeq_peptides)
+
+#write csv for peptide order.
+# C038_0036_pool %>%
+#   select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id) %>%
+#   write_csv(path = "analysis/R/C038_0036_peptides_pool.csv")
 
 ```
+
 
 Make list for C038_0038
 ```{r}
@@ -251,17 +348,36 @@ C038_0038_hlas_vec <- unique(c(C038_0038_hlas$best_hla_1, C038_0038_hlas$best_hl
 C038_0038_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0038 %>%
   filter(allele %in% C038_0038_hlas_vec)
 
-C038_0038_peptides_list_min <- C038_0038_peptides_list %>%
-  group_by(peptide.y) %>%
-  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
-  ungroup() %>%
-  group_by(allele) %>%
-  slice_min(med_perc_rank_x_alleles, n=50) %>%
-  ungroup() %>%
-  arrange(med_perc_rank_x_alleles) %>%
-  distinct(effectId, .keep_all = T) %>%
-  slice_min(med_perc_rank_x_alleles, n=24)
+C038_0038_start_list <- list(
+  top = tibble(),
+  rest = C038_0038_peptides_list
+)
+
+table(TM2_PepSeq_peptides_AE_selected$ashion_id)
+# Need to fill in 11 peptides from 6 alleles, so will select 2 per allele for a total of 18.
+C038_0038_peptides_list_min <- reduce(1:2, get_top_allele_per_peptide, .init=C038_0038_start_list)$top
+
+# Combine with Anna's MHC II peptides, but first get the annotations for those.
+C038_0038_PepSeq_peptides <- TM2_PepSeq_peptides_AE_selected %>%
+  filter(ashion_id == "C038_0038") %>%
+  left_join(annotated_peptides)
+
+# quick check for overlap between PepSeq chosen peptides and prediction chosen.
+# no overlaps
+C038_0038_PepSeq_peptides$sequence %in% C038_0038_peptides_list_min$peptide.y
+C038_0038_pool <- C038_0038_peptides_list_min %>%
+  rename("sequence"="peptide.y") %>%
+  rename("library_member"="name") %>%
+  rename("peptide"="peptide.y.y") %>%
+  full_join(C038_0038_PepSeq_peptides)
+
+#write csv for peptide order.
+# C038_0038_pool %>%
+#   select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id) %>%
+#   write_csv(path = "analysis/R/C038_0038_peptides_pool.csv")
+
 ```
+
 
 Make list for C038_0044
 ```{r}
@@ -271,15 +387,33 @@ C038_0044_hlas_vec <- unique(c(C038_0044_hlas$best_hla_1, C038_0044_hlas$best_hl
 C038_0044_peptides_list <- TM2_annotated_mhc_preds_short_df_split$C038_0044 %>%
   filter(allele %in% C038_0044_hlas_vec)
 
-C038_0044_peptides_list_min <- C038_0044_peptides_list %>%
-  group_by(peptide.y) %>%
-  mutate(med_perc_rank_x_alleles = median(percentile_rank)) %>%
-  ungroup() %>%
-  group_by(allele) %>%
-  slice_min(med_perc_rank_x_alleles, n=50) %>%
-  ungroup() %>%
-  arrange(med_perc_rank_x_alleles) %>%
-  distinct(effectId, .keep_all = T) %>%
-  slice_min(med_perc_rank_x_alleles, n=24)
+C038_0044_start_list <- list(
+  top = tibble(),
+  rest = C038_0044_peptides_list
+)
+
+table(TM2_PepSeq_peptides_AE_selected$ashion_id)
+# Need to fill in 20 peptides from 5 alleles, so will select 4 per allele.
+C038_0044_peptides_list_min <- reduce(1:4, get_top_allele_per_peptide, .init=C038_0044_start_list)$top
+
+# Combine with Anna's MHC II peptides, but first get the annotations for those.
+C038_0044_PepSeq_peptides <- TM2_PepSeq_peptides_AE_selected %>%
+  filter(ashion_id == "C038_0044") %>%
+  left_join(annotated_peptides)
+
+# quick check for overlap between PepSeq chosen peptides and prediction chosen.
+# Looks like we have 3 overlapping between the two. Will have exactly 24 unique peptides.
+C038_0044_PepSeq_peptides$sequence %in% C038_0044_peptides_list_min$peptide.y
+C038_0044_pool <- C038_0044_peptides_list_min %>%
+  rename("sequence"="peptide.y") %>%
+  rename("library_member"="name") %>%
+  rename("peptide"="peptide.y.y") %>%
+  full_join(C038_0044_PepSeq_peptides)
+
+#write csv for peptide order.
+# C038_0044_pool %>%
+#   select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id) %>%
+#   write_csv(path = "analysis/R/C038_0044_peptides_pool.csv")
+
 ```
 
