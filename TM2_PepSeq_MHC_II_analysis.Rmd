@@ -1,0 +1,75 @@
+---
+title: "TM2_PepSeq_MHC_II_analysis"
+author: "E. Kelley"
+date: "12/7/2020"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+library(MHCbindR)
+library(tidyverse)
+library(here)
+library(readxl)
+library(janitor)
+```
+
+
+
+Start analysis for MHC II for C038_0038 and C038_0044
+```{r, import hla II, warning=FALSE}
+hla_II_calls <- import_hla_calls(here("data_from_kevin", "TILPepseq2_Updated", "TILPepseq2_HLA_Types"), "*_hla_II_calls.txt")
+```
+
+
+Take a look at the annotated counts file for PepSeq
+```{r}
+annotated_peptides_with_counts <- read_csv("analysis/R/TM2_run002_annotated_peptides_with_counts.csv")
+samples <- colnames(annotated_peptides_with_counts)[10:123]
+TG1 <- read_delim("~/Downloads/ZZ_sample_list_TG1.txt", delim = "\t", col_names = F) %>%
+  pull(3)
+```
+
+
+```{r}
+TM2_run2_pulldown <- read_excel("TM2_run2 pulldown.xlsx", 
+    sheet = "Mapping", skip = 1) %>%
+  select(Sample, `Sample Replicate`, `Pool Concentration Added`, `Incubation Method`,
+         `HLA Name`, `Cleaved or Uncleaved`, `Bead Type`) %>%
+  clean_names()
+
+
+```
+
+
+
+Threshold read counts.
+```{r}
+sum_annotated_counts <- colSums(as.matrix(annotated_peptides_with_counts[,10:171]))
+annotated_peptides_with_counts_mat <- as.matrix(annotated_peptides_with_counts[,10:171])
+thresholded_annotated_counts <- annotated_peptides_with_counts_mat[, sum_annotated_counts > 100000]  
+```
+
+
+```{r}
+simple_log_log_plot <- function(sample_x, sample_y, matrix, color_by){
+  sample_x <- enquo(sample_x)
+  sample_y <- enquo(sample_y)
+  color_by <- enquo(color_by)
+  df <- as.data.frame(matrix)
+  p <- ggplot(df, aes(log10(!!sample_x), log10(!!sample_y), color=!!color_by)) + geom_point() + theme_minimal()
+  print(p)
+  }
+
+```
+
+
+```{r, define analysis groups}
+analysis_groups <- TM2_run2_pulldown %>%
+  group_by(hla_name, cleaved_or_uncleaved, bead_type) %>%
+  tally()
+
+
+```
+
