@@ -26,6 +26,7 @@ counts_sum <- counts_for_sum %>%
   group_by(sequence_name) %>%
   summarise_if(is.numeric, funs(sum))
 
+names(named_peptides) <- c("id", "sequence")
 # Join the annotation data to the peptide library names.
 annotated_peptides_named <- left_join(annotated_peptides, named_peptides)
 

@@ -220,7 +220,7 @@ fasta[c(FALSE, TRUE)] <- orderfile$`Nucleotide Encoding w/ Adapters`
 Prepare the peptide annotations for PepSeq analysis. 
 ```{r}
 # Import the counts file that John generated.
-counts <- read_delim("counts.tsv", delim = "\t")
+counts <- read_delim("analysis/demux/counts.tsv", delim = "\t")
 
 # Remove the encoding suffix, eg "_100"
 counts_for_sum <- counts %>% 

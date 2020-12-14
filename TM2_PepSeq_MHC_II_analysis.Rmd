@@ -1,7 +1,7 @@
 ---
-title: "TM2_PepSeq_MHC_II_analysis"
+title: "TM2 PepSeq MHC II analysis"
 author: "E. Kelley"
-date: "12/7/2020"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
@@ -13,63 +13,628 @@ library(tidyverse)
 library(here)
 library(readxl)
 library(janitor)
+library(plotly)
+library(ggdendro)
+library(DT)
+library(knitr)
 ```
 
 
+```{r, define create_dt}
+create_dt <- function(x){
+  DT::datatable(x,
+                extensions = 'Buttons',
+                options = list(dom = 'Blfrtip',
+                               buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+                               lengthMenu = list(c(10,25,50,-1),
+                                                 c(10,25,50,"All"))))
+}
+```
 
-Start analysis for MHC II for C038_0038 and C038_0044
+
+```{r, define import hla calls}
+# For some reason the import_hla_calls function has a hard-coded file path for the hla data. Need to redefine it until I can rebuild the package.
+
+import_hla_calls <- function(hla_data_path, file_pattern){
+  files <- dir(path = hla_data_path, pattern = file_pattern)
+  hla_I <- files %>%
+    map_dfr(function(x) {
+      read_table2(file.path(hla_data_path, x), skip = 6) %>% mutate(file=x)
+    }) %>% bind_rows()
+  return(hla_I)
+}
+```
+
+
+```{r, define subset function}
+# need to keep sequence name and control cols. Should set the matrix dimnames and list element names, eg matrix.
+# change `Sample Name on Run` to sample_run_id but must change spreadsheets first.
+get_list_by_samples_mhc <- function(samples_to_filter, pepseq_run_list){
+  sample_metadata <- pepseq_run_list$sample_metadata %>%
+    filter(`Sample Name on Run` %in% samples_to_filter)
+  
+  samples_to_filter <- sample_metadata$`Sample Name on Run`
+  
+  counts <- as.matrix(pepseq_run_list$counts[, colnames(pepseq_run_list$counts) %in% samples_to_filter])
+  
+  #norm_counts <- as.matrix(pepseq_run_list$norm_counts[, colnames(pepseq_run_list$norm_counts) %in% samples_to_filter])
+  
+  #zscores <- as.matrix(pepseq_run_list$zscores[, colnames(pepseq_run_list$zscores) %in% samples_to_filter]) 
+  
+  # Would be good to include a filtered zscores mat that excludes missing peptides
+  
+  # After lab implementation, change `Sample` to `sample_run_id`
+  experiment_metadata <- pepseq_run_list$experiment_metadata %>%
+    filter(Sample %in% samples_to_filter)
+  
+  # Not sure if I should also include library annotations in the returned list? If filtering by peptides, certainly should include, but if filtering by samples perhaps just include the full library annotations? Yes, this allows for piping of subsetted lists to `subset_by_peptides`.
+  return(list(counts = counts,
+              #norm_counts = norm_counts,
+              #zscores = zscores,
+              sample_metadata = sample_metadata,
+              pepseq_library_annotations = pepseq_run_list$pepseq_library_annotations,
+              experiment_metadata = experiment_metadata
+  ))
+}
+```
+
+
+```{r, define get_binders}
+# But for the purposes of these patient, I'm wondering if it's best to apply a simple function eg (C+k/U+k)>T, where:
+# T is a threshold (tuned to match the visual clusters)
+# U and C are the normalized cleaved and uncleaved
+# k is an offset to prevent overcalling at the low end of the range
+
+get_binders <- function(df, cleaved, uncleaved, threshold, k){
+  C <- enquo(cleaved)
+  U <- enquo(uncleaved)
+  subdf <- df %>%
+    rowwise() %>%
+    mutate(threshold_score = (!!C+k)/(!!U+k)) %>%
+    filter(threshold_score > threshold)
+  return(subdf)
+}
+
+
+```
+
+
+```{r, define select_hla_II_top_calls}
+# Adapt my hla I calling function for hla II.
+select_top_hla_II_calls <-
+function(hla_I, trim_patient_name = TRUE) {
+  if (trim_patient_name == TRUE) {
+    hla_call_by_patient <- hla_I %>%
+      mutate(patient = str_sub(Sample, start = 1, end = 9)) %>%
+      group_by(patient) %>%
+      mutate(hla_locus = str_sub(HLA_call, start = 1, end = 6))
+    hla_call_by_patient$HLA_call <- as.factor(hla_call_by_patient$HLA_call)
+
+    hla_call_top_2 <- hla_call_by_patient %>%
+      ungroup() %>%
+      group_by(patient, hla_locus) %>%
+      mutate(best_hla_1 = names(sort(table(HLA_call), decreasing = TRUE)[1])) %>%
+      mutate(best_hla_1_freq = sort(table(HLA_call), decreasing = TRUE)[1]) %>%
+      mutate(best_hla_2 = names(sort(table(HLA_call), decreasing = TRUE)[2])) %>%
+      mutate(best_hla_2_freq = sort(table(HLA_call), decreasing = TRUE)[2]) %>%
+      mutate(best_hla_3 = names(sort(table(HLA_call), decreasing = TRUE)[3])) %>%
+      mutate(best_hla_3_freq = sort(table(HLA_call), decreasing = TRUE)[3])
+
+    hla_putatives <- hla_call_top_2 %>% filter((best_hla_3_freq > 1 & best_hla_3 == HLA_call) |
+      (best_hla_1 == HLA_call) | (best_hla_2_freq > 1 & best_hla_2 == HLA_call))
+    hla_I_filtered <- hla_putatives %>%
+      ungroup() %>%
+      group_by(patient, hla_locus) %>%
+      distinct(HLA_call, .keep_all = TRUE)
+    return(hla_I_filtered)
+  } else {
+    hla_call_by_patient <- hla_I %>%
+      mutate(patient = Sample) %>%
+      group_by(patient) %>%
+      mutate(hla_locus = str_sub(HLA_call, start = 1, end = 6))
+    hla_call_by_patient$HLA_call <- as.factor(hla_call_by_patient$HLA_call)
+
+    hla_call_top_2 <- hla_call_by_patient %>%
+      ungroup() %>%
+      group_by(patient, hla_locus) %>%
+      mutate(best_hla_1 = names(sort(table(HLA_call), decreasing = TRUE)[1])) %>%
+      mutate(best_hla_1_freq = sort(table(HLA_call), decreasing = TRUE)[1]) %>%
+      mutate(best_hla_2 = names(sort(table(HLA_call), decreasing = TRUE)[2])) %>%
+      mutate(best_hla_2_freq = sort(table(HLA_call), decreasing = TRUE)[2]) %>%
+      mutate(best_hla_3 = names(sort(table(HLA_call), decreasing = TRUE)[3])) %>%
+      mutate(best_hla_3_freq = sort(table(HLA_call), decreasing = TRUE)[3])
+
+    hla_putatives <- hla_call_top_2 %>% filter((best_hla_3_freq > 1 & best_hla_3 == HLA_call) |
+      (best_hla_1 == HLA_call) | (best_hla_2_freq > 1 & best_hla_2 == HLA_call))
+
+    hla_I_filtered <- hla_putatives %>%
+      ungroup() %>%
+      group_by(patient, hla_locus) %>%
+      distinct(HLA_call, .keep_all = TRUE)
+    return(hla_I_filtered)
+  }
+}
+```
+
+# PepSeq analysis for MHC II for C038_0038 and C038_0044  
+
+
 ```{r, import hla II, warning=FALSE}
+# Import and summarize patient HLA data.
 hla_II_calls <- import_hla_calls(here("data_from_kevin", "TILPepseq2_Updated", "TILPepseq2_HLA_Types"), "*_hla_II_calls.txt")
+
+hla_II_top_calls <- select_top_hla_II_calls(hla_II_calls) %>%
+  filter(patient %in% c("C038_0044", "C038_0038"))
 ```
 
 
-Take a look at the annotated counts file for PepSeq
-```{r}
+
+```{r, import annotated counts, get samples list}
+#Take a look at the annotated counts file for PepSeq 
 annotated_peptides_with_counts <- read_csv("analysis/R/TM2_run002_annotated_peptides_with_counts.csv")
 samples <- colnames(annotated_peptides_with_counts)[10:123]
-TG1 <- read_delim("~/Downloads/ZZ_sample_list_TG1.txt", delim = "\t", col_names = F) %>%
-  pull(3)
+# TG1 <- read_delim("~/Downloads/ZZ_sample_list_TG1.txt", delim = "\t", col_names = F) %>%
+#   pull(3)
 ```
 
 
-```{r}
-TM2_run2_pulldown <- read_excel("TM2_run2 pulldown.xlsx", 
+
+```{r, make TM2 list}
+# Make a list for this TM2 experiment
+experiment_metadata <- read_excel("TM2_run2 pulldown.xlsx", 
     sheet = "Mapping", skip = 1) %>%
   select(Sample, `Sample Replicate`, `Pool Concentration Added`, `Incubation Method`,
          `HLA Name`, `Cleaved or Uncleaved`, `Bead Type`) %>%
   clean_names()
 
+sample_metadata = annotated_peptides_with_counts[,1:9]
 
-```
-
-
-
-Threshold read counts.
-```{r}
 sum_annotated_counts <- colSums(as.matrix(annotated_peptides_with_counts[,10:171]))
-annotated_peptides_with_counts_mat <- as.matrix(annotated_peptides_with_counts[,10:171])
-thresholded_annotated_counts <- annotated_peptides_with_counts_mat[, sum_annotated_counts > 100000]  
+
+counts = as.matrix(annotated_peptides_with_counts[,10:171])
+counts = counts[, sum_annotated_counts > 100000]
+rownames(counts) <- annotated_peptides_with_counts$id
+
+norm_counts <- sweep(counts, 2, colSums(counts), `/`)*nrow(counts)
+
+TM2_run2 <- list(
+ sample_metadata = sample_metadata,
+ counts = counts,
+ norm_counts = norm_counts,
+ experiment_metadata = experiment_metadata
+)
+
 ```
 
-
+## Patient Alleles:
 ```{r}
-simple_log_log_plot <- function(sample_x, sample_y, matrix, color_by){
-  sample_x <- enquo(sample_x)
-  sample_y <- enquo(sample_y)
-  color_by <- enquo(color_by)
-  df <- as.data.frame(matrix)
-  p <- ggplot(df, aes(log10(!!sample_x), log10(!!sample_y), color=!!color_by)) + geom_point() + theme_minimal()
-  print(p)
-  }
+create_dt(hla_II_top_calls %>% select(patient, hla_locus, best_hla_1, best_hla_2))
+```
+  
+  
+## Alleles on PepSeq run:  
+```{r}
+knitr::kable(table(TM2_run2$experiment_metadata$hla_name))
+```
+
+
+# Patient C038_0038  
+
+Alleles for Patient C038_0038:  
+```{r}
+knitr::kable(tibble(patient_C038_0038_alleles=c(
+  "HLA-DQB1*03:01 (not run)",
+  "HLA-DRB1*11:04",
+  "HLA-DRB1*03:02 (This DR is named like the DQ's?)")  
+ ))
+```
+ 
+ 
+  
+Select only mutant peptides?  
+```{r, get C038_0038 peptides}
+C038_0038_peptides <- TM2_run2$sample_metadata %>%
+  filter(str_detect(file, "C038_0038")) %>%
+  pull(id)
+```
+
+
+```{r, choose 0301}
+### Below code was for DRB1*03:01, but that's actually not this patient's allele. I got confused my Anna's powerpoint. There are no DQB1*03:01 MHC's on this PepSeq run, so can't choose peptides for this allele.
+
+# allele_0301 <- TM2_run2$experiment_metadata %>%
+#   filter(hla_name == "HLA-DQB1*03:01") %>%
+#   pull(sample)
+
+# allele_0301_counts <- as.matrix(TM2_run2$norm_counts[rownames(TM2_run2$norm_counts) %in% C038_0038_peptides, colnames(TM2_run2$norm_counts) %in% allele_0301])
+# t_allele_0301_counts <- hclust(dist(t(allele_0301_counts), method = "euclidean"), method = "complete")
+# ggdendrogram(t_allele_0301_counts, rotate = T)
+# 
+# # ll_0301 <- simple_log_log_plot(sample_x = "Un_1_03.01_ProG.L243_TM2_10uL.48_A", sample_y =  "Cl_1_03.01_ProG.L243_TM2_10uL.48_A", matrix = allele_0301_counts, color_by = "Un_1_03.01_ProG.L243_TM2_10uL.48_A")
+# 
+# #replaced allele_0301_counts with norm_counts to include all samples in the plot
+# df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+#   rowwise(.) %>%
+#   mutate(mean_Un_1_03.01_ProG.L243_TM2_10uL.48 = mean(c(Un_1_03.01_ProG.L243_TM2_10uL.48_A, Un_1_03.01_ProG.L243_TM2_10uL.48_B, Un_1_03.01_ProG.L243_TM2_10uL.48_C))) %>%
+#   mutate(mean_Cl_1_03.01_ProG.L243_TM2_10uL.48 = mean(c(Cl_1_03.01_ProG.L243_TM2_10uL.48_A, Cl_1_03.01_ProG.L243_TM2_10uL.48_B, Cl_1_03.01_ProG.L243_TM2_10uL.48_C))) %>%
+#   select(contains("_03.01_"), library_member)
+# binders <- get_binders(df, mean_Cl_1_03.01_ProG.L243_TM2_10uL.48, mean_Un_1_03.01_ProG.L243_TM2_10uL.48, threshold = 2, k=1)
+# tdf <-  df %>% mutate(binding_status = case_when(
+#     library_member %in% binders$library_member ~"pep selected",
+#     !(library_member %in% binders$library_member) ~ "not selected"
+#   )) %>%
+#   mutate(library_type = case_when(
+#     library_member %in% C038_0038_peptides ~ "patient derived peptide",
+#     !(str_detect(library_member, "TM2")) ~ "control",
+#     str_detect(library_member, "TM2") ~ "TM2 peptide",
+#     
+#   ))
+# 
+# p <- ggplot(tdf, aes(log10(mean_Un_1_03.01_ProG.L243_TM2_10uL.48 + 1), log10(mean_Cl_1_03.01_ProG.L243_TM2_10uL.48 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+#   ggtitle("TM2 full library / HLA-DRB1*03:01")
+# ggplotly(p, tooltip = "text")
+# 
+# sample_allele_subset <- tdf %>%
+#   filter(library_member %in% C038_0038_peptides)
+# 
+# p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_1_03.01_ProG.L243_TM2_10uL.48 + 1), log10(mean_Cl_1_03.01_ProG.L243_TM2_10uL.48 + 1), color=binding_status, shape = library_type, text=library_member)) + geom_point() + theme_minimal() +
+#   ggtitle("Patient mutations for HLA-DRB1*03:01")
+# ggplotly(p2, tooltip = "text")
 
 ```
 
 
-```{r, define analysis groups}
-analysis_groups <- TM2_run2_pulldown %>%
-  group_by(hla_name, cleaved_or_uncleaved, bead_type) %>%
-  tally()
+```{r, old func}
+# simple_log_log_plot <- function(sample_x, sample_y, matrix, color_by){
+#   sample_x <- enquo(sample_x)
+#   sample_y <- enquo(sample_y)
+#   color_by <- enquo(color_by)
+#   df <- as.data.frame(matrix)
+#   p <- ggplot(df, aes(log10(!!sample_x), log10(!!sample_y), color=!!color_by)) + geom_point() + theme_minimal()
+#   print(p)
+#   }
+
+```
 
 
+## HLA-DRB1*11:04 for patient C038_0038
+```{r, choose 1104}
+allele_1104 <- TM2_run2$experiment_metadata %>%
+  filter(hla_name == "HLA-DRB1*11:04") %>%
+  pull(sample)
+
+allele_1104_counts <- as.matrix(TM2_run2$norm_counts[, colnames(TM2_run2$norm_counts) %in% allele_1104])
+t_allele_1104_counts <- hclust(dist(t(allele_1104_counts), method = "euclidean"), method = "complete")
+ggdendrogram(t_allele_1104_counts, rotate=T)
+print("Replicates used: Un_1_11.04_ProG.L243_TM2_Norm48.A,B and Cl_1_11.04_ProG.L243_TM2_Norm48.B,C")
+# Use the Norm48 Cl:B,C and Un:A,B
+df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+  rowwise(.) %>%
+  mutate(mean_Un_1_11.04_ProG.L243_TM2_Norm48 = mean(c(Un_1_11.04_ProG.L243_TM2_Norm48.A, Un_1_11.04_ProG.L243_TM2_Norm48.B))) %>%
+  mutate(mean_Cl_1_11.04_ProG.L243_TM2_Norm48 = mean(c(Cl_1_11.04_ProG.L243_TM2_Norm48.B, Cl_1_11.04_ProG.L243_TM2_Norm48.C))) %>%
+  select(contains("_11.04_"), library_member)
+binders <- get_binders(df, mean_Cl_1_11.04_ProG.L243_TM2_Norm48, mean_Un_1_11.04_ProG.L243_TM2_Norm48, threshold = 1.5, k=1)
+tdf <-  df %>% mutate(binding_status = case_when(
+    library_member %in% binders$library_member ~"pep selected",
+    !(library_member %in% binders$library_member) ~ "not selected"
+  )) %>%
+  mutate(library_type = case_when(
+    library_member %in% C038_0038_peptides ~ "patient derived peptide",
+    !(str_detect(library_member, "TM2")) ~ "control",
+    str_detect(library_member, "TM2") ~ "TM2 peptide",
+    
+  ))
+
+p <- ggplot(tdf, aes(log10(mean_Un_1_11.04_ProG.L243_TM2_Norm48 + 1), log10(mean_Cl_1_11.04_ProG.L243_TM2_Norm48 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+  ggtitle("TM2 full library / HLA-DRB1*11:04")
+p
+
+patient_peps <- tdf %>%
+  filter(binding_status == "pep selected") %>%
+  filter(library_type == "patient derived peptide") %>%
+  select(library_member, mean_Cl_1_11.04_ProG.L243_TM2_Norm48, mean_Un_1_11.04_ProG.L243_TM2_Norm48) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id")) %>%
+  filter(!is.na(mean_Cl_1_11.04_ProG.L243_TM2_Norm48)) %>%
+  mutate(cl_un_ratio=mean_Cl_1_11.04_ProG.L243_TM2_Norm48/mean_Un_1_11.04_ProG.L243_TM2_Norm48) %>%
+  arrange(desc(cl_un_ratio)) %>%
+  distinct(effectId, .keep_all = T)
+sample_allele_subset <- tdf %>%
+  filter(library_member %in% C038_0038_peptides) %>%
+mutate(final_pool_status=case_when(
+    library_member %in% patient_peps$library_member ~ "final pool",
+    !(library_member %in% patient_peps$library_member) ~ "dropped")) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id"))
+
+p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_1_11.04_ProG.L243_TM2_Norm48 + 1), log10(mean_Cl_1_11.04_ProG.L243_TM2_Norm48 + 1), color=binding_status, shape = final_pool_status, text=effectId)) + geom_point(size=2.5) + theme_minimal() +
+  ggtitle("Patient mutations for HLA-DRB1*11:04")
+ggplotly(p2, tooltip = "text")
+
+create_dt(patient_peps %>% select(-mean_Cl_1_11.04_ProG.L243_TM2_Norm48, -mean_Un_1_11.04_ProG.L243_TM2_Norm48, -cl_un_ratio))
+
+patient_peps_C038_0038_1104 <- patient_peps
+#write_csv(patient_peps_C038_0038_1104, "patient_peps_C038_0038_1104.csv")
+```
+
+
+## HLA-DRB1*03:02 for patient C038_0038 using 10uL.48 conditions.
+```{r}
+allele_0302 <- TM2_run2$experiment_metadata %>%
+  filter(hla_name == "HLA-DRB1*03:02") %>%
+  pull(sample)
+
+allele_0302_counts <- as.matrix(TM2_run2$norm_counts[, colnames(TM2_run2$norm_counts) %in% allele_0302])
+t_allele_0302_counts <- hclust(dist(t(allele_0302_counts), method = "euclidean"), method = "complete")
+ggdendrogram(t_allele_0302_counts, rotate=T)
+
+print("Replicates used: Un_1_03.02_ProG.L243_TM2_10uL.48_A,B,C and Cl_1_03.02_ProG.L243_TM2_10uL.48_A,B,C")
+
+# Use the 10UL.48 Cl:A,B,C and Un:A,B,C
+df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+  rowwise(.) %>%
+  mutate(mean_Un_1_03.02_ProG.L243_TM2_10uL.48 = mean(c(Un_1_03.02_ProG.L243_TM2_10uL.48_A, Un_1_03.02_ProG.L243_TM2_10uL.48_B,Un_1_03.02_ProG.L243_TM2_10uL.48_C))) %>%
+  mutate(mean_Cl_1_03.02_ProG.L243_TM2_10uL.48 = mean(c(Cl_1_03.02_ProG.L243_TM2_10uL.48_A,Cl_1_03.02_ProG.L243_TM2_10uL.48_B,Cl_1_03.02_ProG.L243_TM2_10uL.48_C))) %>%
+  select(contains("_1_03.02_"), library_member)
+binders <- get_binders(df, mean_Cl_1_03.02_ProG.L243_TM2_10uL.48, mean_Un_1_03.02_ProG.L243_TM2_10uL.48, threshold = 1.5, k=1)
+tdf <-  df %>% mutate(binding_status = case_when(
+    library_member %in% binders$library_member ~"pep selected",
+    !(library_member %in% binders$library_member) ~ "not selected"
+  )) %>%
+  mutate(library_type = case_when(
+    library_member %in% C038_0038_peptides ~ "patient derived peptide",
+    !(str_detect(library_member, "TM2")) ~ "control",
+    str_detect(library_member, "TM2") ~ "TM2 peptide",
+    
+  ))
+
+p <- ggplot(tdf, aes(log10(mean_Un_1_03.02_ProG.L243_TM2_10uL.48 + 1), log10(mean_Cl_1_03.02_ProG.L243_TM2_10uL.48 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+  ggtitle("TM2 full library / HLA-DRB1*03:02")
+p
+
+
+patient_peps <- tdf %>%
+  filter(binding_status == "pep selected") %>%
+  filter(library_type == "patient derived peptide") %>%
+  select(library_member, mean_Cl_1_03.02_ProG.L243_TM2_10uL.48, mean_Un_1_03.02_ProG.L243_TM2_10uL.48) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id")) %>%
+  filter(!is.na(mean_Un_1_03.02_ProG.L243_TM2_10uL.48)) %>%
+  mutate(cl_un_ratio=mean_Cl_1_03.02_ProG.L243_TM2_10uL.48/mean_Un_1_03.02_ProG.L243_TM2_10uL.48) %>%
+  arrange(desc(cl_un_ratio)) %>%
+  distinct(effectId, .keep_all = T)
+sample_allele_subset <- tdf %>%
+  filter(library_member %in% C038_0038_peptides) %>%
+mutate(final_pool_status=case_when(
+    library_member %in% patient_peps$library_member ~ "final pool",
+    !(library_member %in% patient_peps$library_member) ~ "dropped")) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id"))
+
+p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_1_03.02_ProG.L243_TM2_10uL.48 + 1), log10(mean_Cl_1_03.02_ProG.L243_TM2_10uL.48 + 1), color=binding_status, shape = final_pool_status, text=effectId)) + geom_point(size=2.5) + theme_minimal() +
+  ggtitle("Patient mutations for HLA-DRB1*03:02")
+ggplotly(p2, tooltip = "text")
+
+
+create_dt(patient_peps)
+
+patient_peps_C038_0038_0302 <- patient_peps
+#write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
+```
+
+
+## HLA-DRB1*03:02 for patient C038_0038 using 3XPool.48 conditions.
+```{r, 0302 3XPool.48}
+
+print("Replicates used: Cl_1_03.02_ProG.L243_TM2_3XPool.48_A,C and Un_1_03.02_ProG.L243_TM2_3XPool.48_A,B")
+
+
+df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+  rowwise(.) %>%
+  mutate(mean_Un_1_03.02_ProG.L243_TM2_3XPool.48 = mean(c(Un_1_03.02_ProG.L243_TM2_3XPool.48_A, Un_1_03.02_ProG.L243_TM2_3XPool.48_B))) %>%
+  mutate(mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48 = mean(c(Cl_1_03.02_ProG.L243_TM2_3XPool.48_A,Cl_1_03.02_ProG.L243_TM2_3XPool.48_C))) %>%
+  select(contains("_1_03.02_"), library_member)
+binders <- get_binders(df, mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48, mean_Un_1_03.02_ProG.L243_TM2_3XPool.48, threshold = 1.5, k=1)
+tdf <-  df %>% mutate(binding_status = case_when(
+    library_member %in% binders$library_member ~"pep selected",
+    !(library_member %in% binders$library_member) ~ "not selected"
+  )) %>%
+  mutate(library_type = case_when(
+    library_member %in% C038_0038_peptides ~ "patient derived peptide",
+    !(str_detect(library_member, "TM2")) ~ "control",
+    str_detect(library_member, "TM2") ~ "TM2 peptide",
+    
+  ))
+
+p <- ggplot(tdf, aes(log10(mean_Un_1_03.02_ProG.L243_TM2_3XPool.48 + 1), log10(mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+  ggtitle("TM2 full library / HLA-DRB1*03:02")
+p
+
+
+patient_peps <- tdf %>%
+  filter(binding_status == "pep selected") %>%
+  filter(library_type == "patient derived peptide") %>%
+  select(library_member, mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48, mean_Un_1_03.02_ProG.L243_TM2_3XPool.48) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id")) %>%
+  filter(!is.na(mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48)) %>%
+  mutate(cl_un_ratio=mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48/mean_Un_1_03.02_ProG.L243_TM2_3XPool.48) %>%
+  arrange(desc(cl_un_ratio)) %>%
+  distinct(effectId, .keep_all = T)
+sample_allele_subset <- tdf %>%
+  filter(library_member %in% C038_0038_peptides) %>%
+mutate(final_pool_status=case_when(
+    library_member %in% patient_peps$library_member ~ "final pool",
+    !(library_member %in% patient_peps$library_member) ~ "dropped")) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id"))
+
+p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_1_03.02_ProG.L243_TM2_3XPool.48 + 1), log10(mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48 + 1), color=binding_status, shape = final_pool_status, text=effectId)) + geom_point(size=2.5) + theme_minimal() +
+  ggtitle("Patient mutations for HLA-DRB1*03:02")
+ggplotly(p2, tooltip = "text")
+
+create_dt(patient_peps)
+
+patient_peps_C038_0038_0302_3XPool.48 <- patient_peps
+#write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
+
+```
+
+
+## Final MHC II pools for C038_0038  
+Using 3XPool.48 for HLA-DRB1*0302 peptides.
+```{r}
+C038_0038_MHC_II_pool <- bind_rows(patient_peps_C038_0038_1104, patient_peps_C038_0038_0302_3XPool.48) %>%
+  select(library_member, variantId, gene_name, topEffect, sourceName, file, peptide, sequence)
+create_dt(C038_0038_MHC_II_pool)
+#write_csv(C038_0038_MHC_II_pool, "C038_0038_MHC_II_pool.csv")
+```
+
+  
+
+# Patient C038_0044
+
+
+```{r, get peptides for C038_0044}
+# Get peptides for C038_0044
+C038_0044_peptides <- TM2_run2$sample_metadata %>%
+  filter(str_detect(file, "C038_0044")) %>%
+  pull(id)
+```
+
+Alleles for C038_0044:  
+```{r}
+knitr::kable(tibble(patient_C038_0038_alleles=c(
+"HLA-DQB1*03:03",
+"HLA-DQB1*06:02",
+"HLA-DRB1*07:01? (not on run)",
+"HLA-DRB1*15:01? (not on run)"
+ )))
+```
+
+
+HLA-DQB1*03:03 for patient C038_0044
+```{r, choose 0303}
+allele_0303 <- TM2_run2$experiment_metadata %>%
+  filter(hla_name == "HLA-DQB1*03:03") %>%
+  pull(sample)
+
+allele_0303_counts <- as.matrix(TM2_run2$norm_counts[, colnames(TM2_run2$norm_counts) %in% allele_0303])
+t_allele_0303_counts <- hclust(dist(t(allele_0303_counts), method = "euclidean"), method = "complete")
+ggdendrogram(t_allele_0303_counts, rotate = T)
+
+print("Replicates used: Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_A,B,C and Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_A,C")
+#drop cleaved rep B
+#Use the QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 Cl:A,C and Un:A,B,C
+df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+  rowwise(.) %>%
+  mutate(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 = mean(c(Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_A,Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_B, Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_C))) %>%
+  mutate(mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 = mean(c(Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_A, Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2_C))) %>%
+  select(contains("_1_03.03_"), library_member)
+binders <- get_binders(df, mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2, mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2, threshold = 1.5, k=1)
+tdf <-  df %>% mutate(binding_status = case_when(
+    library_member %in% binders$library_member ~"pep selected",
+    !(library_member %in% binders$library_member) ~ "not selected"
+  )) %>%
+  mutate(library_type = case_when(
+    library_member %in% C038_0044_peptides ~ "patient derived peptide",
+    !(str_detect(library_member, "TM2")) ~ "control",
+    str_detect(library_member, "TM2") ~ "TM2 peptide",
+
+  ))
+
+p <- ggplot(tdf, aes(log10(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 + 1), log10(mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+  ggtitle("TM2 full library / HLA-DQB1*03:03")
+p
+
+
+patient_peps <- tdf %>%
+  filter(binding_status == "pep selected") %>%
+  filter(library_type == "patient derived peptide") %>%
+  select(library_member, mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2, mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id")) %>%
+  filter(!is.na(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2)) %>%
+  mutate(cl_un_ratio=mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2/mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2) %>%
+  arrange(desc(cl_un_ratio)) %>%
+  distinct(effectId, .keep_all = T)
+sample_allele_subset <- tdf %>%
+  filter(library_member %in% C038_0044_peptides) %>%
+mutate(final_pool_status=case_when(
+    library_member %in% patient_peps$library_member ~ "final pool",
+    !(library_member %in% patient_peps$library_member) ~ "dropped")) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id"))
+
+p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 + 1), log10(mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2 + 1), color=binding_status, shape = final_pool_status, text=effectId)) + geom_point(size=2.5) + theme_minimal() +
+  ggtitle("Patient mutations for HLA-DQB1*03:03")
+ggplotly(p2, tooltip = "text")
+
+create_dt(patient_peps)
+patient_peps_C038_0044_0303 <- patient_peps
+#write_csv(patient_peps_C038_0044_0303, "patient_peps_C038_0044_0303.csv")
+```
+
+
+HLA-DQB1*06:02 for patient C038_0044
+```{r, choose 0602}
+allele_0602 <- TM2_run2$experiment_metadata %>%
+  filter(hla_name == "HLA-DQB1*06:02") %>%
+  pull(sample)
+
+allele_0602_counts <- as.matrix(TM2_run2$norm_counts[, colnames(TM2_run2$norm_counts) %in% allele_0602])
+t_allele_0602_counts <- hclust(dist(t(allele_0602_counts), method = "euclidean"), method = "complete")
+ggdendrogram(t_allele_0602_counts, rotate = T)
+
+# drop replicate cleaved B
+# Cl_QB_1_06.02_ProG.DQ_TM2_A
+
+print("Replicates used: Un_QB_1_06.02_ProG.DQ_TM2_A,B,C and Cl_QB_1_06.02_ProG.DQ_TM2_A,C")
+df <- as.data.frame(TM2_run2$norm_counts) %>% rownames_to_column("library_member") %>%
+  rowwise(.) %>%
+  mutate(mean_Un_QB_1_06.02_ProG.DQ_TM2 = mean(c(Un_QB_1_06.02_ProG.DQ_TM2_A, Un_QB_1_06.02_ProG.DQ_TM2_B, Un_QB_1_06.02_ProG.DQ_TM2_C))) %>%
+  mutate(mean_Cl_QB_1_06.02_ProG.DQ_TM2 = mean(c(Cl_QB_1_06.02_ProG.DQ_TM2_A, Cl_QB_1_06.02_ProG.DQ_TM2_C))) %>%
+  select(contains("_1_06.02_"), library_member)
+binders <- get_binders(df,mean_Cl_QB_1_06.02_ProG.DQ_TM2, mean_Un_QB_1_06.02_ProG.DQ_TM2, threshold = 1.8, k=1)
+tdf <-  df %>% mutate(binding_status = case_when(
+    library_member %in% binders$library_member ~"pep selected",
+    !(library_member %in% binders$library_member) ~ "not selected"
+  )) %>%
+  mutate(library_type = case_when(
+    library_member %in% C038_0044_peptides ~ "patient derived peptide",
+    !(str_detect(library_member, "TM2")) ~ "control",
+    str_detect(library_member, "TM2") ~ "TM2 peptide"
+  ))
+
+p <- ggplot(tdf, aes(log10(mean_Un_QB_1_06.02_ProG.DQ_TM2 + 1), log10(mean_Cl_QB_1_06.02_ProG.DQ_TM2 + 1), color=library_type, shape=binding_status , text=library_member)) + geom_point() + theme_minimal() +
+  ggtitle("TM2 full library / HLA-DQB1*06:02")
+p
+
+
+patient_peps <- tdf %>%
+  filter(binding_status == "pep selected") %>%
+  filter(library_type == "patient derived peptide") %>%
+  select(library_member, mean_Cl_QB_1_06.02_ProG.DQ_TM2, mean_Un_QB_1_06.02_ProG.DQ_TM2) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id")) %>%
+  filter(!is.na(mean_Un_QB_1_06.02_ProG.DQ_TM2)) %>%
+  mutate(cl_un_ratio=mean_Cl_QB_1_06.02_ProG.DQ_TM2/mean_Un_QB_1_06.02_ProG.DQ_TM2) %>%
+  arrange(desc(cl_un_ratio)) %>%
+  distinct(effectId, .keep_all = T)
+sample_allele_subset <- tdf %>%
+  filter(library_member %in% C038_0044_peptides) %>%
+mutate(final_pool_status=case_when(
+    library_member %in% patient_peps$library_member ~ "final pool",
+    !(library_member %in% patient_peps$library_member) ~ "dropped")) %>%
+  full_join(TM2_run2$sample_metadata, by=c("library_member"="id"))
+
+p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_QB_1_06.02_ProG.DQ_TM2 + 1), log10(mean_Cl_QB_1_06.02_ProG.DQ_TM2 + 1), color=binding_status, shape = final_pool_status, text=effectId)) + geom_point(size=2.5) + theme_minimal() +
+  ggtitle("Patient mutations for HLA-DQB1*06:02")
+ggplotly(p2, tooltip = "text")
+
+create_dt(patient_peps)
+
+patient_peps_C038_0044_0602 <- patient_peps
+
+```
+
+
+## Final MHC II pools for C038_0044
+```{r}
+C038_0044_MHC_II_pool <- bind_rows(patient_peps_C038_0044_0303, patient_peps_C038_0044_0602) %>%
+  select(library_member, variantId, gene_name, topEffect, sourceName, file, peptide, sequence)
+create_dt(C038_0044_MHC_II_pool)
+#write_csv(C038_0044_MHC_II_pool, "C038_0044_MHC_II_pool.csv")
 ```
 
