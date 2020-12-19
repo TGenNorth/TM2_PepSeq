@@ -1,0 +1,2 @@
+library_member,mean_Cl_1_11.04_ProG.L243_TM2_Norm48,mean_Un_1_11.04_ProG.L243_TM2_Norm48,variantId,gene_name,topEffect,sourceName,file,peptide,sequence,effectId,cl_un_ratio,mhc_ii_allele
+TM2_01083,31.09485128677862,2.3595374033811933,chr13 g.25284691A>G,ATP12A,TRUE,C038_0038,C038_0038_merged_Ashion_Research_Peptide.varCode.csv,mutPept7,ADLIIRETRRNSIFQ,ENST00000218548_p.K959E|ENST00000381946_p.K953E,13.178367608082844,HLA-DRB1*11:04

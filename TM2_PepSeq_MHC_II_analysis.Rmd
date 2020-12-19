@@ -231,7 +231,7 @@ knitr::kable(tibble(patient_C038_0038_alleles=c(
  
  
   
-Select only mutant peptides?  
+ 
 ```{r, get C038_0038 peptides}
 C038_0038_peptides <- TM2_run2$sample_metadata %>%
   filter(str_detect(file, "C038_0038")) %>%
@@ -337,7 +337,8 @@ patient_peps <- tdf %>%
   filter(!is.na(mean_Cl_1_11.04_ProG.L243_TM2_Norm48)) %>%
   mutate(cl_un_ratio=mean_Cl_1_11.04_ProG.L243_TM2_Norm48/mean_Un_1_11.04_ProG.L243_TM2_Norm48) %>%
   arrange(desc(cl_un_ratio)) %>%
-  distinct(effectId, .keep_all = T)
+  distinct(effectId, .keep_all = T) %>%
+  filter(str_detect(peptide, "mut"))
 sample_allele_subset <- tdf %>%
   filter(library_member %in% C038_0038_peptides) %>%
 mutate(final_pool_status=case_when(
@@ -351,8 +352,9 @@ ggplotly(p2, tooltip = "text")
 
 create_dt(patient_peps %>% select(-mean_Cl_1_11.04_ProG.L243_TM2_Norm48, -mean_Un_1_11.04_ProG.L243_TM2_Norm48, -cl_un_ratio))
 
-patient_peps_C038_0038_1104 <- patient_peps
-#write_csv(patient_peps_C038_0038_1104, "patient_peps_C038_0038_1104.csv")
+patient_peps_C038_0038_1104 <- patient_peps %>% 
+  mutate(mhc_ii_allele="HLA-DRB1*11:04")
+# write_csv(patient_peps_C038_0038_1104, "patient_peps_C038_0038_1104.csv")
 ```
 
 
@@ -399,7 +401,9 @@ patient_peps <- tdf %>%
   filter(!is.na(mean_Un_1_03.02_ProG.L243_TM2_10uL.48)) %>%
   mutate(cl_un_ratio=mean_Cl_1_03.02_ProG.L243_TM2_10uL.48/mean_Un_1_03.02_ProG.L243_TM2_10uL.48) %>%
   arrange(desc(cl_un_ratio)) %>%
-  distinct(effectId, .keep_all = T)
+  distinct(effectId, .keep_all = T) %>%
+  filter(str_detect(peptide, "mut"))
+
 sample_allele_subset <- tdf %>%
   filter(library_member %in% C038_0038_peptides) %>%
 mutate(final_pool_status=case_when(
@@ -414,8 +418,9 @@ ggplotly(p2, tooltip = "text")
 
 create_dt(patient_peps)
 
-patient_peps_C038_0038_0302 <- patient_peps
-#write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
+patient_peps_C038_0038_0302 <- patient_peps %>% 
+  mutate(mhc_ii_allele="HLA-DRB1*03:02")
+# write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
 ```
 
 
@@ -455,7 +460,8 @@ patient_peps <- tdf %>%
   filter(!is.na(mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48)) %>%
   mutate(cl_un_ratio=mean_Cl_1_03.02_ProG.L243_TM2_3XPool.48/mean_Un_1_03.02_ProG.L243_TM2_3XPool.48) %>%
   arrange(desc(cl_un_ratio)) %>%
-  distinct(effectId, .keep_all = T)
+  distinct(effectId, .keep_all = T) %>%
+  filter(str_detect(peptide, "mut"))
 sample_allele_subset <- tdf %>%
   filter(library_member %in% C038_0038_peptides) %>%
 mutate(final_pool_status=case_when(
@@ -469,8 +475,9 @@ ggplotly(p2, tooltip = "text")
 
 create_dt(patient_peps)
 
-patient_peps_C038_0038_0302_3XPool.48 <- patient_peps
-#write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
+patient_peps_C038_0038_0302_3XPool.48 <- patient_peps %>% 
+  mutate(mhc_ii_allele="HLA-DRB1*03:02")
+# write_csv(patient_peps_C038_0038_0302, "patient_peps_C038_0044_0302.csv")
 
 ```
 
@@ -479,12 +486,25 @@ patient_peps_C038_0038_0302_3XPool.48 <- patient_peps
 Using 3XPool.48 for HLA-DRB1*0302 peptides.
 ```{r}
 C038_0038_MHC_II_pool <- bind_rows(patient_peps_C038_0038_1104, patient_peps_C038_0038_0302_3XPool.48) %>%
-  select(library_member, variantId, gene_name, topEffect, sourceName, file, peptide, sequence)
+  select(library_member, variantId, mhc_ii_allele, gene_name, sourceName, file, peptide, sequence, effectId) %>%
+  rename(ashion_id = sourceName)
 create_dt(C038_0038_MHC_II_pool)
-#write_csv(C038_0038_MHC_II_pool, "C038_0038_MHC_II_pool.csv")
+# write_csv(C038_0038_MHC_II_pool, "analysis/R/C038_0038_MHC_II_pool.csv")
 ```
 
-  
+
+Export final pool for C038_0038 including MHC I and II peptides.  
+```{r, combine MHC I and II for final pool for C038_0038}
+  C038_0038_peptides_pool_MHC_I <- read_csv("analysis/R/C038_0038_peptides_pool_MHC_I.csv")
+
+C038_0038_peptides_pool <- full_join(C038_0038_peptides_pool_MHC_I, C038_0038_MHC_II_pool) %>%
+  select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id)
+
+ # write_csv(C038_0038_peptides_pool, "analysis/R/C038_0038_peptides_pool.csv")
+create_dt(C038_0038_peptides_pool)
+```
+
+
 
 # Patient C038_0044
 
@@ -550,7 +570,8 @@ patient_peps <- tdf %>%
   filter(!is.na(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2)) %>%
   mutate(cl_un_ratio=mean_Cl_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2/mean_Un_QB_1_03.03_ProG.WR18.DR.DP.DQ_TM2) %>%
   arrange(desc(cl_un_ratio)) %>%
-  distinct(effectId, .keep_all = T)
+  distinct(effectId, .keep_all = T) %>%
+  filter(str_detect(peptide, "mut"))
 sample_allele_subset <- tdf %>%
   filter(library_member %in% C038_0044_peptides) %>%
 mutate(final_pool_status=case_when(
@@ -563,8 +584,9 @@ p2 <- ggplot(sample_allele_subset, aes(log10(mean_Un_QB_1_03.03_ProG.WR18.DR.DP.
 ggplotly(p2, tooltip = "text")
 
 create_dt(patient_peps)
-patient_peps_C038_0044_0303 <- patient_peps
-#write_csv(patient_peps_C038_0044_0303, "patient_peps_C038_0044_0303.csv")
+patient_peps_C038_0044_0303 <- patient_peps %>% 
+  mutate(mhc_ii_allele="HLA-DQB1*03:03")
+# write_csv(patient_peps_C038_0044_0303, "analysis/R/patient_peps_C038_0044_0303.csv")
 ```
 
 
@@ -611,7 +633,8 @@ patient_peps <- tdf %>%
   filter(!is.na(mean_Un_QB_1_06.02_ProG.DQ_TM2)) %>%
   mutate(cl_un_ratio=mean_Cl_QB_1_06.02_ProG.DQ_TM2/mean_Un_QB_1_06.02_ProG.DQ_TM2) %>%
   arrange(desc(cl_un_ratio)) %>%
-  distinct(effectId, .keep_all = T)
+  distinct(effectId, .keep_all = T) %>%
+  filter(str_detect(peptide, "mut"))
 sample_allele_subset <- tdf %>%
   filter(library_member %in% C038_0044_peptides) %>%
 mutate(final_pool_status=case_when(
@@ -625,16 +648,31 @@ ggplotly(p2, tooltip = "text")
 
 create_dt(patient_peps)
 
-patient_peps_C038_0044_0602 <- patient_peps
-
+patient_peps_C038_0044_0602 <- patient_peps %>% 
+  mutate(mhc_ii_allele="HLA-DQB1*06:02")
+# write_csv(patient_peps_C038_0044_0602, "analysis/R/patient_peps_C038_0044_0602.csv")
 ```
 
 
 ## Final MHC II pools for C038_0044
 ```{r}
 C038_0044_MHC_II_pool <- bind_rows(patient_peps_C038_0044_0303, patient_peps_C038_0044_0602) %>%
-  select(library_member, variantId, gene_name, topEffect, sourceName, file, peptide, sequence)
+  select(library_member, variantId, mhc_ii_allele, gene_name, sourceName, file, peptide, sequence, effectId) %>%
+  rename(ashion_id = sourceName)
 create_dt(C038_0044_MHC_II_pool)
-#write_csv(C038_0044_MHC_II_pool, "C038_0044_MHC_II_pool.csv")
+# write_csv(C038_0044_MHC_II_pool, "analysis/R/C038_0044_MHC_II_pool.csv")
 ```
+
+Export final pool for C038_0044 including MHC I and II peptides.  
+```{r, combine MHC I and II for final pool for C038_0044}
+C038_0044_peptides_pool_MHC_I <- read_csv("analysis/R/C038_0044_peptides_pool_MHC_I.csv")
+
+C038_0044_peptides_pool <- full_join(C038_0044_peptides_pool_MHC_I, C038_0044_MHC_II_pool) %>%
+  select(library_member, sequence, allele, mhc_ii_allele, effectId, variantId, gene_name, peptide, ashion_id)
+
+ # write_csv(C038_0044_peptides_pool, "analysis/R/C038_0044_peptides_pool.csv")
+create_dt(C038_0044_peptides_pool)
+```
+
+
 

@@ -1,0 +1,2 @@
+library_member,mean_Cl_QB_1_06.02_ProG.DQ_TM2,mean_Un_QB_1_06.02_ProG.DQ_TM2,variantId,gene_name,topEffect,sourceName,file,peptide,sequence,effectId,cl_un_ratio,mhc_ii_allele
+TM2_01201,5.580239747997123,2.6425600771312108,chr18 g.44268857C>T,ST8SIA5,TRUE,C038_0044,C038_0044_merged_Ashion_Research_Peptide.varCode.csv,mutPept7,LSRCCNTPAFLFTTQ,ENST00000315087_p.A113T|ENST00000536490_p.A82T|ENST00000538168_p.A149T,2.111679426435249,HLA-DQB1*06:02
