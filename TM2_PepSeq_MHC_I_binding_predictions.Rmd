@@ -186,6 +186,8 @@ Function to select the peptide with best binding for each allele and append to l
 #   top = tibble(), # starting with an empty tibble
 #   rest = myexample
 # )
+#slice_min can carry tie's for percentile rank through and end up with duplicate effectId's.
+#I think I can fix this by using a combination of arrange and distinct.
 
 get_top_allele_per_peptide <- function(l, counter) {
   # get best percentile_rank per peptide
